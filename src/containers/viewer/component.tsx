@@ -436,11 +436,12 @@ class Viewer extends React.Component<ViewerProps, ViewerState> {
     for (let i = 0; i < docs.length; i++) {
       let doc = docs[i];
       if (!doc) continue;
-      doc.addEventListener("click", () => {
+      doc.addEventListener("click", (event) => {
         this.props.handleLeaveReader("left");
         this.props.handleLeaveReader("right");
         this.props.handleLeaveReader("top");
         this.props.handleLeaveReader("bottom");
+        this.handleScreenTap(event);
       });
       doc.addEventListener("mouseup", (event) => {
         if (
@@ -498,6 +499,44 @@ class Viewer extends React.Component<ViewerProps, ViewerState> {
         var rect = selection.getRangeAt(0).getBoundingClientRect();
         this.setState({ rect });
       });
+    }
+  };
+  handleScreenTap = async (event?: MouseEvent) => {
+    if (!this.props.htmlBook || lock) {
+      return;
+    }
+    if (event) {
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const interactiveTags = [
+          "a",
+          "button",
+          "input",
+          "textarea",
+          "select",
+          "video",
+          "audio",
+          "label",
+        ];
+        if (interactiveTags.includes(target.tagName.toLowerCase())) {
+          return;
+        }
+        const selection = target.ownerDocument?.getSelection();
+        if (selection && selection.toString().trim().length > 0) {
+          return;
+        }
+      }
+    }
+    lock = true;
+    try {
+      await this.props.htmlBook.rendition.next();
+      this.handleLocation();
+    } catch (error) {
+      console.error("Failed to flip page on tap:", error);
+    } finally {
+      setTimeout(() => {
+        lock = false;
+      }, 200);
     }
   };
   render() {
