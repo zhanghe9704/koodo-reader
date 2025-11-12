@@ -38,6 +38,8 @@ class TextToSpeech extends React.Component<
   activeAudio: HTMLAudioElement | null;
   useServerVoices: boolean;
   activeAudioUrl: string | null;
+  serverAudioCache: Map<number, string>;
+  serverAudioLoading: Map<number, Promise<string | null>>;
   constructor(props: TextToSpeechProps) {
     super(props);
     this.state = {
@@ -58,6 +60,8 @@ class TextToSpeech extends React.Component<
     this.activeAudio = null;
     this.useServerVoices = false;
     this.activeAudioUrl = null;
+    this.serverAudioCache = new Map();
+    this.serverAudioLoading = new Map();
   }
   fetchServerVoices = async () => {
     this.setState({ isFetchingVoices: true });
@@ -132,6 +136,7 @@ class TextToSpeech extends React.Component<
       this.cleanupActiveAudio();
       this.setState({ isAudioOn: false });
       this.nodeList = [];
+      this.resetServerAudioCache();
     } else {
       if (
         !isElectron &&
@@ -162,6 +167,7 @@ class TextToSpeech extends React.Component<
         this.setState({ isAddNew: true });
         return;
       }
+      this.resetServerAudioCache();
       this.handleStartSpeech();
     }
   };
@@ -175,14 +181,24 @@ class TextToSpeech extends React.Component<
       this.activeAudioUrl = null;
     }
   };
+  resetServerAudioCache = () => {
+    this.serverAudioLoading.clear();
+    this.serverAudioCache.forEach((url) => {
+      URL.revokeObjectURL(url);
+    });
+    this.serverAudioCache.clear();
+    this.activeAudioUrl = null;
+  };
   handleStartSpeech = () => {
     this.setState({ isAudioOn: true }, () => {
       this.handleAudio();
     });
   };
   handleAudio = async () => {
+    this.resetServerAudioCache();
     this.nodeList = await this.handleGetText();
     if (this.useServerVoices && this.serverVoices.length > 0) {
+      await this.prefetchServerAudio(0);
       await this.handleSystemRead(0);
       return;
     }
@@ -475,10 +491,7 @@ class TextToSpeech extends React.Component<
   handleServerSpeech = async (index: number, speed: number) => {
     return new Promise<string>(async (resolve) => {
       try {
-        const audioUrl = await this.requestServerAudio(
-          this.sanitizeNodeText(this.nodeList[index]),
-          speed
-        );
+        const audioUrl = await this.prefetchServerAudio(index, speed);
         if (!audioUrl) {
           resolve("end");
           return;
@@ -508,11 +521,42 @@ class TextToSpeech extends React.Component<
             resolve("end");
           });
         }
+        // Preload next sentence while current audio plays
+        this.prefetchServerAudio(index + 1, speed);
       } catch (error) {
         console.error("Failed to play TTS audio", error);
         resolve("end");
       }
     });
+  };
+  prefetchServerAudio = async (index: number, speed: number) => {
+    if (index < 0 || index >= this.nodeList.length) {
+      return null;
+    }
+    if (this.serverAudioCache.has(index)) {
+      return this.serverAudioCache.get(index) as string;
+    }
+    if (this.serverAudioLoading.has(index)) {
+      return this.serverAudioLoading.get(index);
+    }
+
+    const loadPromise = (async () => {
+      try {
+        const url = await this.requestServerAudio(
+          this.sanitizeNodeText(this.nodeList[index]),
+          speed
+        );
+        if (url) {
+          this.serverAudioCache.set(index, url);
+        }
+        return url;
+      } finally {
+        this.serverAudioLoading.delete(index);
+      }
+    })();
+
+    this.serverAudioLoading.set(index, loadPromise);
+    return loadPromise;
   };
   requestServerAudio = async (text: string, speed: number) => {
     const voiceId =
