@@ -659,6 +659,21 @@ class Header extends React.Component<HeaderProps, HeaderState> {
           <div
             className="setting-icon-container"
             onClick={() => {
+              window.location.href = "/";
+            }}
+            style={{ top: "18px" }}
+          >
+            <span
+              data-tooltip-id="my-tooltip"
+              data-tooltip-content={this.props.t("Home")}
+              data-tooltip-place="left"
+            >
+              <span className="icon-home header-sort-icon"></span>
+            </span>
+          </div>
+          <div
+            className="setting-icon-container"
+            onClick={() => {
               this.props.handleSortDisplay(!this.props.isSortDisplay);
             }}
             onMouseLeave={() => {

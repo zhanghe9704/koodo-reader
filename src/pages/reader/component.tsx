@@ -388,13 +388,28 @@ class Reader extends React.Component<ReaderProps, ReaderState> {
               </div>
             )}
           {!this.props.isHideMenuButton && (
-            <div
-              className="reader-setting-icon-container"
-              onClick={this.handleLayoutButtonClick}
-              onDoubleClick={this.handleLayoutButtonDoubleClick}
-            >
-              <span className="icon-grid reader-setting-icon"></span>
-            </div>
+            <>
+              <div
+                className="reader-setting-icon-container"
+                style={{ marginRight: "10px" }}
+                onClick={() => {
+                  window.location.href = "/";
+                }}
+                data-tooltip-id="my-tooltip"
+                data-tooltip-content={this.props.t("Home")}
+              >
+                <span className="icon-home reader-setting-icon"></span>
+              </div>
+              <div
+                className="reader-setting-icon-container"
+                onClick={this.handleLayoutButtonClick}
+                onDoubleClick={this.handleLayoutButtonDoubleClick}
+                data-tooltip-id="my-tooltip"
+                data-tooltip-content={this.props.t("Panels")}
+              >
+                <span className="icon-grid reader-setting-icon"></span>
+              </div>
+            </>
           )}
         </div>
 
