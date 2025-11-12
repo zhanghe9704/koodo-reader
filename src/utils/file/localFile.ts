@@ -8,6 +8,7 @@ import CoverUtil from "./coverUtil";
 import BookUtil from "./bookUtil";
 import toast from "react-hot-toast";
 import i18n from "../../i18n";
+import { isElectron } from "react-device-detect";
 
 declare global {
   interface FileSystemDirectoryHandle {
@@ -49,18 +50,152 @@ declare global {
     }): Promise<FileSystemDirectoryHandle>;
   }
 }
+
+const REMOTE_STORAGE_BASE = "/api/koodo/storage";
+const REMOTE_DIRECTORY_LABEL = "BookReader/Koodo";
+const isRemoteStorageMode =
+  typeof window !== "undefined" && !isElectron && !!REMOTE_STORAGE_BASE;
+
+const arrayBufferToBase64 = (
+  input: ArrayBuffer | ArrayBufferView
+): string => {
+  const view = ArrayBuffer.isView(input)
+    ? new Uint8Array(
+        input.buffer,
+        input.byteOffset,
+        input.byteLength || input.buffer.byteLength
+      )
+    : new Uint8Array(input);
+  let binary = "";
+  for (let i = 0; i < view.byteLength; i++) {
+    binary += String.fromCharCode(view[i]);
+  }
+  return btoa(binary);
+};
+
+const base64ToArrayBuffer = (base64String: string): ArrayBuffer => {
+  const binaryString = atob(base64String);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
+
+const remoteFetch = async (
+  path: string,
+  options: RequestInit = {}
+): Promise<any> => {
+  const requestInit: RequestInit = {
+    credentials: "same-origin",
+    ...options,
+  };
+  if (requestInit.method && requestInit.method.toUpperCase() !== "GET") {
+    requestInit.headers = {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    };
+  }
+  const response = await fetch(`${REMOTE_STORAGE_BASE}${path}`, requestInit);
+  let payload: any = null;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    payload = null;
+  }
+  if (
+    !response.ok ||
+    (payload &&
+      Object.prototype.hasOwnProperty.call(payload, "success") &&
+      payload.success === false)
+  ) {
+    throw new Error(
+      (payload && payload.message) || `Remote storage error: ${response.status}`
+    );
+  }
+  return payload;
+};
+
+const RemoteStorage = {
+  async listFiles(folderPath?: string): Promise<string[]> {
+    const query = folderPath
+      ? `?folderPath=${encodeURIComponent(folderPath)}`
+      : "";
+    const result = await remoteFetch(`/list${query}`, { method: "GET" });
+    return (result && result.files) || [];
+  },
+  async readFile(
+    filename: string,
+    folderPath: string | undefined,
+    mode: "text" | "binary"
+  ) {
+    return remoteFetch("/read", {
+      method: "POST",
+      body: JSON.stringify({
+        filename,
+        folderPath: folderPath || "",
+        mode,
+      }),
+    });
+  },
+  async writeFile(
+    filename: string,
+    content: string,
+    folderPath: string | undefined,
+    mode: "text" | "binary"
+  ) {
+    return remoteFetch("/write", {
+      method: "POST",
+      body: JSON.stringify({
+        filename,
+        folderPath: folderPath || "",
+        content,
+        mode,
+      }),
+    });
+  },
+  async deleteFile(filename: string, folderPath?: string) {
+    return remoteFetch("/delete", {
+      method: "POST",
+      body: JSON.stringify({
+        filename,
+        folderPath: folderPath || "",
+      }),
+    });
+  },
+  async fileExists(filename: string, folderPath?: string): Promise<boolean> {
+    const result = await remoteFetch("/exists", {
+      method: "POST",
+      body: JSON.stringify({
+        filename,
+        folderPath: folderPath || "",
+      }),
+    });
+    return !!(result && result.exists);
+  },
+};
 export class LocalFileManager {
   private static directoryHandle: FileSystemDirectoryHandle | null = null;
   private static readonly STORAGE_KEY = "koodo_directory_handle";
 
   // 检查浏览器是否支持 File System Access API
   static isSupported(): boolean {
-    return "showDirectoryPicker" in window;
+    if (isRemoteStorageMode) {
+      return true;
+    }
+    return typeof window !== "undefined" && "showDirectoryPicker" in window;
   }
 
   // 请求目录访问权限
   static async requestDirectoryAccess(): Promise<FileSystemDirectoryHandle | null> {
     try {
+      if (isRemoteStorageMode) {
+        this.directoryHandle = {
+          name: REMOTE_DIRECTORY_LABEL,
+        } as FileSystemDirectoryHandle;
+        return this.directoryHandle;
+      }
       if (!this.isSupported()) {
         throw new Error("File System Access API not supported");
       }
@@ -87,6 +222,13 @@ export class LocalFileManager {
     directoryName?: string;
   }> {
     try {
+      if (isRemoteStorageMode) {
+        return {
+          hasAccess: true,
+          needsReauthorization: false,
+          directoryName: REMOTE_DIRECTORY_LABEL,
+        };
+      }
       const storedHandle = await this.retrieveDirectoryHandle();
 
       if (!storedHandle) {
@@ -109,6 +251,12 @@ export class LocalFileManager {
   // 修改 ensureDirectoryAccess 方法，移除自动权限请求
   static async ensureDirectoryAccess(): Promise<FileSystemDirectoryHandle | null> {
     try {
+      if (isRemoteStorageMode) {
+        this.directoryHandle = {
+          name: REMOTE_DIRECTORY_LABEL,
+        } as FileSystemDirectoryHandle;
+        return this.directoryHandle;
+      }
       // 首先尝试获取已存储的句柄
       const storedHandle = await this.retrieveDirectoryHandle();
 
@@ -143,6 +291,12 @@ export class LocalFileManager {
   // 修改 getStoredDirectoryHandle，移除自动权限请求
   static async getStoredDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
     try {
+      if (isRemoteStorageMode) {
+        this.directoryHandle = {
+          name: REMOTE_DIRECTORY_LABEL,
+        } as FileSystemDirectoryHandle;
+        return this.directoryHandle;
+      }
       if (this.directoryHandle) {
         // 验证权限是否仍然有效
         const permission = await (this.directoryHandle as any).queryPermission({
@@ -279,6 +433,19 @@ export class LocalFileManager {
     folderPath?: string
   ): Promise<boolean> {
     try {
+      if (isRemoteStorageMode) {
+        const isText = typeof content === "string";
+        const payload = isText
+          ? (content as string)
+          : arrayBufferToBase64(content as ArrayBuffer);
+        await RemoteStorage.writeFile(
+          filename,
+          payload,
+          folderPath,
+          isText ? "text" : "binary"
+        );
+        return true;
+      }
       const directoryHandle = await this.getStoredDirectoryHandle();
       if (!directoryHandle) {
         throw new Error("No directory access permission");
@@ -312,6 +479,18 @@ export class LocalFileManager {
     folderPath?: string
   ): Promise<string | null> {
     try {
+      if (isRemoteStorageMode) {
+        const exists = await RemoteStorage.fileExists(filename, folderPath);
+        if (!exists) {
+          return null;
+        }
+        const result = await RemoteStorage.readFile(
+          filename,
+          folderPath,
+          "text"
+        );
+        return result?.content ?? null;
+      }
       const directoryHandle = await this.getStoredDirectoryHandle();
       if (!directoryHandle) {
         throw new Error("No directory access permission");
@@ -345,6 +524,22 @@ export class LocalFileManager {
     folderPath?: string
   ): Promise<ArrayBuffer | null> {
     try {
+      if (isRemoteStorageMode) {
+        const exists = await RemoteStorage.fileExists(filename, folderPath);
+        if (!exists) {
+          console.info(`File ${filename} does not exist in ${folderPath}`);
+          return null;
+        }
+        const result = await RemoteStorage.readFile(
+          filename,
+          folderPath,
+          "binary"
+        );
+        if (!result?.content) {
+          return null;
+        }
+        return base64ToArrayBuffer(result.content);
+      }
       const directoryHandle = await this.getStoredDirectoryHandle();
       if (!directoryHandle) {
         throw new Error("No directory access permission");
@@ -383,6 +578,9 @@ export class LocalFileManager {
     folderPath?: string
   ): Promise<boolean> {
     try {
+      if (isRemoteStorageMode) {
+        return await RemoteStorage.fileExists(filename, folderPath);
+      }
       const directoryHandle = await this.getStoredDirectoryHandle();
       if (!directoryHandle) {
         return false;
@@ -418,6 +616,10 @@ export class LocalFileManager {
     folderPath?: string
   ): Promise<boolean> {
     try {
+      if (isRemoteStorageMode) {
+        await RemoteStorage.deleteFile(filename, folderPath);
+        return true;
+      }
       const directoryHandle = await this.getStoredDirectoryHandle();
       if (!directoryHandle) {
         throw new Error("No directory access permission");
@@ -452,6 +654,9 @@ export class LocalFileManager {
   // 列出文件夹中的文件（支持指定文件夹）
   static async listFiles(folderPath?: string): Promise<string[]> {
     try {
+      if (isRemoteStorageMode) {
+        return await RemoteStorage.listFiles(folderPath);
+      }
       const directoryHandle = await this.getStoredDirectoryHandle();
       if (!directoryHandle) {
         throw new Error("No directory access permission");
@@ -486,6 +691,9 @@ export class LocalFileManager {
 
   // 检查是否有有效的目录访问权限
   static async hasValidAccess(): Promise<boolean> {
+    if (isRemoteStorageMode) {
+      return true;
+    }
     const handle = await this.getStoredDirectoryHandle();
     return handle !== null;
   }
@@ -493,6 +701,9 @@ export class LocalFileManager {
   // 清除存储的权限
   static async clearStoredAccess(): Promise<void> {
     try {
+      if (isRemoteStorageMode) {
+        return;
+      }
       this.directoryHandle = null;
       const db = await this.openDatabase();
       const transaction = db.transaction(["handles"], "readwrite");

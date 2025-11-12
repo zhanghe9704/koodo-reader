@@ -28,6 +28,7 @@ export interface HeaderProps extends RouteComponentProps<any> {
   handleFetchDataSourceList: () => void;
   handleDrag: (isDrag: boolean) => void;
   handleFetchBooks: () => void;
+  importBookFunc?: (file: File) => Promise<void>;
   t: (title: string) => string;
   handleFetchNotes: () => void;
   handleFetchBookmarks: () => void;

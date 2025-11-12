@@ -22,6 +22,7 @@ let isMouseMoving = false;
 class Reader extends React.Component<ReaderProps, ReaderState> {
   messageTimer!: NodeJS.Timeout;
   tickTimer!: NodeJS.Timeout;
+  layoutToggleTimer?: NodeJS.Timeout;
   constructor(props: ReaderProps) {
     super(props);
     this.state = {
@@ -124,6 +125,36 @@ class Reader extends React.Component<ReaderProps, ReaderState> {
       default:
         break;
     }
+  };
+  openAllPanels = () => {
+    this.handleEnterReader("left");
+    this.handleEnterReader("right");
+    this.handleEnterReader("bottom");
+    this.handleEnterReader("top");
+  };
+  showRightPanelOnly = () => {
+    this.handleEnterReader("right");
+    this.setState({
+      isOpenLeftPanel: false,
+      isOpenTopPanel: false,
+      isOpenBottomPanel: false,
+    });
+  };
+  handleLayoutButtonClick = () => {
+    if (this.layoutToggleTimer) {
+      clearTimeout(this.layoutToggleTimer);
+    }
+    this.layoutToggleTimer = setTimeout(() => {
+      this.openAllPanels();
+      this.layoutToggleTimer = undefined;
+    }, 200);
+  };
+  handleLayoutButtonDoubleClick = () => {
+    if (this.layoutToggleTimer) {
+      clearTimeout(this.layoutToggleTimer);
+      this.layoutToggleTimer = undefined;
+    }
+    this.showRightPanelOnly();
   };
   handleLeaveReader = (position: string) => {
     switch (position) {
@@ -359,12 +390,8 @@ class Reader extends React.Component<ReaderProps, ReaderState> {
           {!this.props.isHideMenuButton && (
             <div
               className="reader-setting-icon-container"
-              onClick={() => {
-                this.handleEnterReader("left");
-                this.handleEnterReader("right");
-                this.handleEnterReader("bottom");
-                this.handleEnterReader("top");
-              }}
+              onClick={this.handleLayoutButtonClick}
+              onDoubleClick={this.handleLayoutButtonDoubleClick}
             >
               <span className="icon-grid reader-setting-icon"></span>
             </div>

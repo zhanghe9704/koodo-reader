@@ -33,6 +33,7 @@ const mapStateToProps = (state: stateType) => {
     isAuthed: state.manager.isAuthed,
     defaultSyncOption: state.backupPage.defaultSyncOption,
     isSortDisplay: state.manager.isSortDisplay,
+    importBookFunc: state.book.importBookFunc,
   };
 };
 const actionCreator = {

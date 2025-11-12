@@ -41,6 +41,10 @@ import SyncService from "../../utils/storage/syncService";
 import { LocalFileManager } from "../../utils/file/localFile";
 import { updateUserConfig } from "../../utils/request/user";
 import packageJson from "../../../package.json";
+import {
+  fetchServerLibraryBooks,
+  downloadServerLibraryBook,
+} from "../../utils/file/serverLibrary";
 declare var window: any;
 
 class Header extends React.Component<HeaderProps, HeaderState> {
@@ -332,7 +336,61 @@ class Header extends React.Component<HeaderProps, HeaderState> {
       ConfigUtil
     );
   };
+  handleServerLibrarySync = async (): Promise<false | undefined> => {
+    const importFunc = this.props.importBookFunc;
+    if (!importFunc) {
+      toast.error(this.props.t("Import failed"));
+      return false;
+    }
+    this.setState({ isSync: true });
+    try {
+      toast.loading(this.props.t("Start syncing"), {
+        id: "syncing",
+        position: "bottom-center",
+      });
+      const serverBooks = await fetchServerLibraryBooks();
+      const existingMd5 = new Set(
+        (this.props.books || []).map((book) => book.md5)
+      );
+      const importQueue = serverBooks.filter(
+        (item) => !item.md5 || !existingMd5.has(item.md5)
+      );
+      if (importQueue.length === 0) {
+        toast.dismiss("syncing");
+        toast.success("Library is already up to date");
+        return undefined;
+      }
+      let importedCount = 0;
+      for (const book of importQueue) {
+        try {
+          const file = await downloadServerLibraryBook(book.path);
+          await importFunc(file);
+          importedCount += 1;
+        } catch (error) {
+          console.error("Failed to import", book.path, error);
+        }
+      }
+      toast.dismiss("syncing");
+      toast.success(`Imported ${importedCount} book(s)`);
+      this.props.handleFetchBooks();
+      return undefined;
+    } catch (error) {
+      console.error("Server library sync failed", error);
+      toast.dismiss("syncing");
+      toast.error(
+        this.props.t("Import failed") +
+          ": " +
+          (error instanceof Error ? error.message : String(error))
+      );
+      return false;
+    } finally {
+      this.setState({ isSync: false });
+    }
+  };
   handleCloudSync = async () => {
+    if (!isElectron) {
+      return await this.handleServerLibrarySync();
+    }
     let config = {};
     let service = ConfigService.getItem("defaultSyncOption");
     if (!service) {
@@ -661,15 +719,11 @@ class Header extends React.Component<HeaderProps, HeaderState> {
           <div
             className="setting-icon-container"
             onClick={async () => {
-              if (!isElectron && !this.props.isAuthed) {
-                toast(
-                  this.props.t(
-                    "This feature is not available in the free version"
-                  )
-                );
+              this.setState({ isSync: true });
+              if (!isElectron) {
+                await this.handleServerLibrarySync();
                 return;
               }
-              this.setState({ isSync: true });
               if (this.props.isAuthed) {
                 await this.props.handleFetchUserInfo();
                 this.handleCloudSync();
@@ -697,36 +751,7 @@ class Header extends React.Component<HeaderProps, HeaderState> {
           </div>
         </div>
 
-        {!this.props.isAuthed && !this.state.isHidePro ? (
-          <div className="header-report-container">
-            <span
-              style={{ textDecoration: "underline" }}
-              onClick={() => {
-                if (
-                  window.location.href.startsWith("http") &&
-                  window.location.hostname !== "web.koodoreader.com" &&
-                  window.location.hostname !== "web.koodoreader.cn"
-                ) {
-                  this.props.handleSetting(true);
-                  this.props.handleSettingMode("account");
-                  return;
-                }
-                this.props.history.push("/login");
-              }}
-            >
-              <Trans>Pro version</Trans>
-              <span> </span>
-            </span>
-
-            <span
-              className="icon-close icon-pro-close"
-              onClick={() => {
-                ConfigService.setReaderConfig("isHidePro", "yes");
-                this.setState({ isHidePro: true });
-              }}
-            ></span>
-          </div>
-        ) : null}
+        {/* Pro upsell removed for hosted version */}
 
         <ImportLocal
           {...{
