@@ -16,4 +16,7 @@ export interface TextToSpeechState {
   isSupported: boolean;
   isAudioOn: boolean;
   isAddNew: boolean;
+  isHighlightEnabled: boolean;
+  selectedServerVoice: string;
+  isFetchingVoices: boolean;
 }

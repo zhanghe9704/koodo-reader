@@ -11,6 +11,7 @@ import {
   splitSentences,
   WEBSITE_URL,
 } from "../../utils/common";
+import { getSelection } from "../../utils/reader/mouseEvent";
 import { isElectron } from "react-device-detect";
 import toast from "react-hot-toast";
 import TTSUtil from "../../utils/reader/ttsUtil";
@@ -19,6 +20,12 @@ import { openExternalUrl } from "../../utils/common";
 import DatabaseService from "../../utils/storage/databaseService";
 declare var window: any;
 declare var global: any;
+
+interface ServerVoice {
+  id: string;
+  name: string;
+  locale?: string;
+}
 class TextToSpeech extends React.Component<
   TextToSpeechProps,
   TextToSpeechState
@@ -27,17 +34,65 @@ class TextToSpeech extends React.Component<
   voices: any;
   customVoices: any;
   nativeVoices: any;
+  serverVoices: ServerVoice[];
+  activeAudio: HTMLAudioElement | null;
+  useServerVoices: boolean;
+  activeAudioUrl: string | null;
   constructor(props: TextToSpeechProps) {
     super(props);
     this.state = {
       isSupported: false,
       isAudioOn: false,
       isAddNew: false,
+      isHighlightEnabled:
+        ConfigService.getReaderConfig("ttsHighlight") !== "no",
+      selectedServerVoice:
+        ConfigService.getReaderConfig("ttsServerVoice") || "",
+      isFetchingVoices: false,
     };
     this.nodeList = [];
     this.voices = [];
     this.customVoices = [];
     this.nativeVoices = [];
+    this.serverVoices = [];
+    this.activeAudio = null;
+    this.useServerVoices = false;
+    this.activeAudioUrl = null;
+  }
+  fetchServerVoices = async () => {
+    this.setState({ isFetchingVoices: true });
+    try {
+      const response = await fetch("/api/tts/voices");
+      if (!response.ok) {
+        throw new Error("Failed to load voices");
+      }
+      const data = await response.json();
+      if (data.success && Array.isArray(data.voices)) {
+        this.serverVoices = data.voices;
+        this.useServerVoices = this.serverVoices.length > 0;
+        let selectedVoice = this.state.selectedServerVoice;
+        if (
+          (!selectedVoice ||
+            !this.serverVoices.find((voice) => voice.id === selectedVoice)) &&
+          this.serverVoices.length > 0
+        ) {
+          selectedVoice = this.serverVoices[0].id;
+          ConfigService.setReaderConfig("ttsServerVoice", selectedVoice);
+        }
+        this.setState({ selectedServerVoice: selectedVoice });
+      } else {
+        this.useServerVoices = false;
+      }
+    } catch (error) {
+      console.error("Failed to fetch TTS voices", error);
+      this.useServerVoices = false;
+    } finally {
+      this.setState({ isFetchingVoices: false });
+    }
+  };
+  componentWillUnmount(): void {
+    this.cleanupActiveAudio();
+    window.speechSynthesis && window.speechSynthesis.cancel();
   }
   async componentDidMount() {
     if ("speechSynthesis" in window) {
@@ -65,22 +120,42 @@ class TextToSpeech extends React.Component<
       });
     };
     this.nativeVoices = await setSpeech();
+    if (!isElectron) {
+      this.fetchServerVoices();
+    }
   }
   handleChangeAudio = () => {
     this.setState({ isAddNew: false });
     if (this.state.isAudioOn) {
       window.speechSynthesis && window.speechSynthesis.cancel();
       TTSUtil.pauseAudio();
+      this.cleanupActiveAudio();
       this.setState({ isAudioOn: false });
       this.nodeList = [];
     } else {
+      if (
+        !isElectron &&
+        this.serverVoices.length === 0 &&
+        this.state.isFetchingVoices
+      ) {
+        toast(this.props.t("Loading voices, please try again"));
+        return;
+      }
       if (isElectron) {
         this.customVoices = TTSUtil.getVoiceList(this.props.plugins);
         this.voices = [...this.nativeVoices, ...this.customVoices];
+        this.useServerVoices = false;
       } else {
-        this.voices = this.nativeVoices;
+        if (this.serverVoices.length > 0) {
+          this.voices = this.serverVoices;
+          this.useServerVoices = true;
+        } else {
+          this.voices = this.nativeVoices;
+          this.useServerVoices = false;
+        }
       }
       if (
+        !this.useServerVoices &&
         this.voices.length === 0 &&
         getAllVoices(this.props.plugins).length === 0
       ) {
@@ -90,6 +165,16 @@ class TextToSpeech extends React.Component<
       this.handleStartSpeech();
     }
   };
+  cleanupActiveAudio = () => {
+    if (this.activeAudio) {
+      this.activeAudio.pause();
+      this.activeAudio = null;
+    }
+    if (this.activeAudioUrl) {
+      URL.revokeObjectURL(this.activeAudioUrl);
+      this.activeAudioUrl = null;
+    }
+  };
   handleStartSpeech = () => {
     this.setState({ isAudioOn: true }, () => {
       this.handleAudio();
@@ -97,6 +182,10 @@ class TextToSpeech extends React.Component<
   };
   handleAudio = async () => {
     this.nodeList = await this.handleGetText();
+    if (this.useServerVoices && this.serverVoices.length > 0) {
+      await this.handleSystemRead(0);
+      return;
+    }
     let voiceIndex = parseInt(ConfigService.getReaderConfig("voiceIndex")) || 0;
     if (
       voiceIndex > this.nativeVoices.length - 1 &&
@@ -126,6 +215,17 @@ class TextToSpeech extends React.Component<
       this.nodeList = rawNodeList.flat();
     }
 
+    const selectionText = getSelection(this.props.currentBook.format);
+    if (selectionText) {
+      const normalizedSelection = this.normalizeSentence(selectionText);
+      const startIndex = this.nodeList.findIndex((sentence) =>
+        this.normalizeSentence(sentence).includes(normalizedSelection)
+      );
+      if (startIndex > 0) {
+        this.nodeList = this.nodeList.slice(startIndex);
+      }
+    }
+
     if (this.nodeList.length === 0) {
       if (
         this.props.currentBook.format === "PDF" &&
@@ -144,9 +244,40 @@ class TextToSpeech extends React.Component<
     }
     return this.nodeList;
   };
+  normalizeSentence = (text: string) => {
+    return text ? text.replace(/\s+/g, " ").trim().toLowerCase() : "";
+  };
+  sanitizeNodeText = (text: string) => {
+    return text
+      .replace(/\s\s/g, " ")
+      .replace(/\r/g, " ")
+      .replace(/\n/g, " ")
+      .replace(/\t/g, " ")
+      .replace(/&/g, " ")
+      .replace(/\f/g, " ");
+  };
+  getCurrentSpeed = () => {
+    let speed = parseFloat(
+      ConfigService.getReaderConfig("voiceSpeed") || "1"
+    );
+    if (isNaN(speed)) {
+      speed = 1;
+    }
+    speed = Math.min(2, Math.max(0.5, speed));
+    return speed;
+  };
+  handleServerVoiceChange = (voiceId: string) => {
+    ConfigService.setReaderConfig("ttsServerVoice", voiceId);
+    this.setState({ selectedServerVoice: voiceId });
+  };
+  toggleHighlight = () => {
+    const next = !this.state.isHighlightEnabled;
+    this.setState({ isHighlightEnabled: next });
+    ConfigService.setReaderConfig("ttsHighlight", next ? "yes" : "no");
+  };
   async handleCustomRead() {
     let voiceIndex = parseInt(ConfigService.getReaderConfig("voiceIndex")) || 0;
-    let speed = parseFloat(ConfigService.getReaderConfig("voiceSpeed")) || 1;
+    let speed = this.getCurrentSpeed();
     TTSUtil.setAudioPaths();
     await TTSUtil.cacheAudio(
       [this.nodeList[0]],
@@ -166,7 +297,9 @@ class TextToSpeech extends React.Component<
 
     for (let index = 0; index < this.nodeList.length; index++) {
       let currentText = this.nodeList[index];
-      let style = "background: #f3a6a68c;";
+      let style = this.state.isHighlightEnabled
+        ? "background: #f3a6a68c;"
+        : "";
       this.props.htmlBook.rendition.highlightAudioNode(currentText, style);
 
       if (index > TTSUtil.getAudioPaths().length - 1) {
@@ -178,7 +311,7 @@ class TextToSpeech extends React.Component<
       let res = await this.handleSpeech(
         index,
         parseInt(ConfigService.getReaderConfig("voiceIndex")) || 0,
-        parseFloat(ConfigService.getReaderConfig("voiceSpeed")) || 1
+        this.getCurrentSpeed()
       );
       let visibleTextList = await this.props.htmlBook.rendition.visibleText();
       let lastVisibleTextList = visibleTextList;
@@ -233,13 +366,15 @@ class TextToSpeech extends React.Component<
       return;
     }
     let currentText = this.nodeList[index];
-    let style = "background: #f3a6a68c;";
+    let style = this.state.isHighlightEnabled
+      ? "background: #f3a6a68c;"
+      : "";
     this.props.htmlBook.rendition.highlightAudioNode(currentText, style);
 
     let res = await this.handleSystemSpeech(
       index,
       parseInt(ConfigService.getReaderConfig("voiceIndex")) || 0,
-      parseFloat(ConfigService.getReaderConfig("voiceSpeed")) || 1
+      this.getCurrentSpeed()
     );
 
     if (res === "start") {
@@ -313,15 +448,12 @@ class TextToSpeech extends React.Component<
     voiceIndex: number,
     speed: number
   ) => {
+    if (this.useServerVoices) {
+      return this.handleServerSpeech(index, speed);
+    }
     return new Promise<string>(async (resolve) => {
       var msg = new SpeechSynthesisUtterance();
-      msg.text = this.nodeList[index]
-        .replace(/\s\s/g, "")
-        .replace(/\r/g, "")
-        .replace(/\n/g, "")
-        .replace(/\t/g, "")
-        .replace(/&/g, "")
-        .replace(/\f/g, "");
+      msg.text = this.sanitizeNodeText(this.nodeList[index]);
 
       msg.voice = this.nativeVoices[voiceIndex];
       msg.rate = speed;
@@ -340,7 +472,91 @@ class TextToSpeech extends React.Component<
       };
     });
   };
+  handleServerSpeech = async (index: number, speed: number) => {
+    return new Promise<string>(async (resolve) => {
+      try {
+        const audioUrl = await this.requestServerAudio(
+          this.sanitizeNodeText(this.nodeList[index]),
+          speed
+        );
+        if (!audioUrl) {
+          resolve("end");
+          return;
+        }
+        this.cleanupActiveAudio();
+        const audio = new Audio(audioUrl);
+        audio.onended = () => {
+          this.cleanupActiveAudio();
+          if (!(this.state.isAudioOn && this.props.isReading)) {
+            resolve("end");
+          } else {
+            resolve("start");
+          }
+        };
+        audio.onerror = (event) => {
+          console.error("TTS playback error", event);
+          this.cleanupActiveAudio();
+          resolve("end");
+        };
+        this.activeAudio = audio;
+        this.activeAudioUrl = audioUrl;
+        const playPromise = audio.play();
+        if (playPromise && playPromise.catch) {
+          playPromise.catch((error) => {
+            console.error("Unable to start audio", error);
+            this.cleanupActiveAudio();
+            resolve("end");
+          });
+        }
+      } catch (error) {
+        console.error("Failed to play TTS audio", error);
+        resolve("end");
+      }
+    });
+  };
+  requestServerAudio = async (text: string, speed: number) => {
+    const voiceId =
+      this.state.selectedServerVoice || this.serverVoices[0]?.id || "";
+    if (!voiceId) {
+      toast.error(this.props.t("No voice selected"));
+      return null;
+    }
+    try {
+      const response = await fetch("/api/tts/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ text, voice: voiceId, speed }),
+      });
+      if (!response.ok) {
+        throw new Error("TTS endpoint error");
+      }
+      const data = await response.json();
+      if (!data.success || !data.audio) {
+        throw new Error(data.message || "TTS request failed");
+      }
+      const byteCharacters = atob(data.audio);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], {
+        type: data.mimeType || "audio/wav",
+      });
+      return URL.createObjectURL(blob);
+    } catch (error) {
+      console.error(error);
+      toast.error(this.props.t("Unable to generate speech"));
+      return null;
+    }
+  };
   render() {
+    const showingServerVoices =
+      !isElectron && this.useServerVoices && this.serverVoices.length > 0;
+    const voiceSelectValue = showingServerVoices
+      ? this.state.selectedServerVoice
+      : ConfigService.getReaderConfig("voiceIndex") || "0";
     return (
       <>
         {
@@ -388,7 +604,13 @@ class TextToSpeech extends React.Component<
                   name=""
                   className="lang-setting-dropdown"
                   id="text-speech-voice"
+                  value={voiceSelectValue}
                   onChange={(event) => {
+                    if (showingServerVoices) {
+                      this.handleServerVoiceChange(event.target.value);
+                      toast(this.props.t("Take effect at next startup"));
+                      return;
+                    }
                     if (event.target.value === this.voices.length - 1 + "") {
                       window.speechSynthesis && window.speechSynthesis.cancel();
                       TTSUtil.pauseAudio();
@@ -403,23 +625,27 @@ class TextToSpeech extends React.Component<
                     }
                   }}
                 >
-                  {this.voices.map((item, index: number) => {
-                    return (
-                      <option
-                        value={index}
-                        key={item.name}
-                        className="lang-setting-option"
-                        selected={
-                          index ===
-                          parseInt(
-                            ConfigService.getReaderConfig("voiceIndex") || "0"
-                          )
-                        }
-                      >
-                        {this.props.t(item.displayName || item.name)}
-                      </option>
-                    );
-                  })}
+                  {showingServerVoices
+                    ? this.serverVoices.map((item) => (
+                        <option
+                          value={item.id}
+                          key={item.id}
+                          className="lang-setting-option"
+                        >
+                          {this.props.t(item.name)}
+                        </option>
+                      ))
+                    : this.voices.map((item, index: number) => {
+                        return (
+                          <option
+                            value={index}
+                            key={item.name}
+                            className="lang-setting-option"
+                          >
+                            {this.props.t(item.displayName || item.name)}
+                          </option>
+                        );
+                      })}
                 </select>
               </div>
             )}
@@ -433,6 +659,9 @@ class TextToSpeech extends React.Component<
                   name=""
                   id="text-speech-speed"
                   className="lang-setting-dropdown"
+                  value={
+                    ConfigService.getReaderConfig("voiceSpeed") || "1"
+                  }
                   onChange={(event) => {
                     ConfigService.setReaderConfig(
                       "voiceSpeed",
@@ -447,15 +676,43 @@ class TextToSpeech extends React.Component<
                       value={item.value}
                       className="lang-setting-option"
                       key={item.value}
-                      selected={
-                        item.value ===
-                        (ConfigService.getReaderConfig("voiceSpeed") || "1")
-                      }
                     >
                       {item.label}
                     </option>
                   ))}
                 </select>
+              </div>
+            )}
+            {this.state.isAudioOn && !this.state.isAddNew && (
+              <div className="single-control-switch-container">
+                <span className="single-control-switch-title">
+                  <Trans>Highlight sentence while reading</Trans>
+                </span>
+
+                <span
+                  className="single-control-switch"
+                  onClick={() => {
+                    this.toggleHighlight();
+                  }}
+                  style={
+                    this.state.isHighlightEnabled ? {} : { opacity: 0.6 }
+                  }
+                >
+                  <span
+                    className="single-control-button"
+                    style={
+                      this.state.isHighlightEnabled
+                        ? {
+                            transform: "translateX(20px)",
+                            transition: "transform 0.5s ease",
+                          }
+                        : {
+                            transform: "translateX(0px)",
+                            transition: "transform 0.5s ease",
+                          }
+                    }
+                  ></span>
+                </span>
               </div>
             )}
             {this.state.isAddNew && (
