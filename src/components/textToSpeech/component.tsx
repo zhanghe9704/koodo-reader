@@ -198,7 +198,7 @@ class TextToSpeech extends React.Component<
     this.resetServerAudioCache();
     this.nodeList = await this.handleGetText();
     if (this.useServerVoices && this.serverVoices.length > 0) {
-      await this.prefetchServerAudio(0);
+      await this.prefetchServerAudio(0, this.getCurrentSpeed());
       await this.handleSystemRead(0);
       return;
     }
