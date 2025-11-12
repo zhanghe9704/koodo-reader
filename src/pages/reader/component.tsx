@@ -586,7 +586,11 @@ class Reader extends React.Component<ReaderProps, ReaderState> {
                 }
           }
         >
-          <SettingPanel />
+          <SettingPanel
+            {...{
+              handleHideRightPanel: () => this.handleLeaveReader("right"),
+            }}
+          />
         </div>
         <div
           className="navigation-panel-container"
@@ -640,6 +644,9 @@ class Reader extends React.Component<ReaderProps, ReaderState> {
           onMouseLeave={() => {
             this.handleLeaveReader("top");
           }}
+          onDoubleClick={() => {
+            this.handleLeaveReader("top");
+          }}
           style={
             this.state.isOpenTopPanel
               ? {
@@ -665,6 +672,7 @@ class Reader extends React.Component<ReaderProps, ReaderState> {
             <OperationPanel
               {...{
                 currentDuration: this.state.currentDuration,
+                handleHideTopPanel: () => this.handleLeaveReader("top"),
               }}
             />
           )}

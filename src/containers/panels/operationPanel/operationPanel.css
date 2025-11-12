@@ -98,8 +98,27 @@
   animation: fade-down 0.1s ease-in-out 0s 1;
 }
 .book-opeartion-info {
-  text-align: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   line-height: 25px;
   margin-top: 7px;
   font-size: 15px;
+  gap: 12px;
+}
+.book-opeartion-info-content {
+  flex: 1;
+  text-align: center;
+}
+.reading-option-actions {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: inherit;
+  background: rgba(0, 0, 0, 0.05);
+}
+.reading-option-actions:hover {
+  background: rgba(0, 0, 0, 0.12);
 }

@@ -59,7 +59,16 @@ class SettingPanel extends React.Component<
         ></span>
 
         <div className="setting-panel-title">
-          <Trans>Reading option</Trans>
+          <div className="setting-panel-title-text">
+            <Trans>Reading option</Trans>
+          </div>
+          <div
+            className="setting-panel-hide"
+            onClick={this.props.handleHideRightPanel}
+          >
+            <span className="icon-close"></span>
+            <Trans>Hide</Trans>
+          </div>
         </div>
         <div className="setting-panel">
           <ModeControl />

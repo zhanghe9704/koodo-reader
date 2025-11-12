@@ -8,6 +8,7 @@ export interface SettingPanelProps {
   readerMode: string;
   t: (title: string) => string;
   handleSettingLock: (isSettingLocked: boolean) => void;
+  handleHideRightPanel: () => void;
   renderBookFunc: () => void;
 }
 export interface SettingPanelState {}

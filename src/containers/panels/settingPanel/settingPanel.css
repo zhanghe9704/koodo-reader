@@ -1,11 +1,32 @@
 .setting-panel-title {
   display: flex;
-  justify-content: center;
   align-items: center;
+  justify-content: space-between;
   width: calc(100% - 44px);
   height: 38px;
   font-weight: 500;
   margin: 4px 22px;
+  gap: 10px;
+}
+.setting-panel-title-text {
+  flex: 1;
+  text-align: center;
+}
+.setting-panel-hide {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 13px;
+  color: inherit;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.05);
+}
+.setting-panel-hide:hover {
+  background: rgba(0, 0, 0, 0.12);
+}
+.setting-panel-hide .icon-close {
+  margin-right: 4px;
 }
 .setting-panel-parent {
   position: absolute;

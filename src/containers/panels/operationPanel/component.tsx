@@ -149,33 +149,44 @@ class OperationPanel extends React.Component<
     return (
       <div className="book-operation-panel">
         <div className="book-opeartion-info">
-          <span>
-            <Trans
-              i18nKey="Current reading time"
-              count={Math.floor(
-                Math.abs(Math.floor(this.props.currentDuration / 60))
-              )}
-            >
-              Current reading time:
-              {{
-                count: Math.abs(Math.floor(this.props.currentDuration / 60)),
-              }}
-              min
-            </Trans>
-          </span>
-          &nbsp;&nbsp;&nbsp;
-          <span>
-            <Trans
-              i18nKey="Remaining reading time"
-              count={Math.ceil(this.state.timeLeft / 60)}
-            >
-              Remaining reading time:
-              {{
-                count: `${Math.ceil(this.state.timeLeft / 60)}`,
-              }}
-              min
-            </Trans>
-          </span>
+          <div className="book-opeartion-info-content">
+            <span>
+              <Trans
+                i18nKey="Current reading time"
+                count={Math.floor(
+                  Math.abs(Math.floor(this.props.currentDuration / 60))
+                )}
+              >
+                Current reading time:
+                {{
+                  count: Math.abs(Math.floor(this.props.currentDuration / 60)),
+                }}
+                min
+              </Trans>
+            </span>
+            &nbsp;&nbsp;&nbsp;
+            <span>
+              <Trans
+                i18nKey="Remaining reading time"
+                count={Math.ceil(this.state.timeLeft / 60)}
+              >
+                Remaining reading time:
+                {{
+                  count: `${Math.ceil(this.state.timeLeft / 60)}`,
+                }}
+                min
+              </Trans>
+            </span>
+          </div>
+          <div
+            className="reading-option-actions"
+            onClick={this.props.handleHideTopPanel}
+          >
+            <span className="icon-close exit-reading-icon"></span>
+            <span className="exit-reading-text">
+              <Trans>Hide</Trans>
+            </span>
+          </div>
         </div>
         <div
           className="exit-reading-button"
