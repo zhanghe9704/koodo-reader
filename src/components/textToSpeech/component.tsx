@@ -26,6 +26,14 @@ interface ServerVoice {
   name: string;
   locale?: string;
 }
+
+const ALLOWED_NATIVE_VOICE_PATTERNS = [
+  /Google US English/i,
+  /Google UK English Male/i,
+  /Google UK English Female/i,
+  /Google\s*普通话/i,
+  /Google.*日本語/i,
+];
 class TextToSpeech extends React.Component<
   TextToSpeechProps,
   TextToSpeechState
@@ -123,11 +131,22 @@ class TextToSpeech extends React.Component<
         }
       });
     };
-    this.nativeVoices = await setSpeech();
+    this.nativeVoices = this.filterNativeVoices(await setSpeech());
     if (!isElectron) {
       this.fetchServerVoices();
     }
   }
+  filterNativeVoices = (voices: SpeechSynthesisVoice[] | any[]) => {
+    if (!voices || voices.length === 0) {
+      return voices;
+    }
+    const filtered = voices.filter((voice: any) =>
+      ALLOWED_NATIVE_VOICE_PATTERNS.some((pattern) =>
+        pattern.test(voice.name)
+      )
+    );
+    return filtered.length > 0 ? filtered : voices;
+  };
   handleChangeAudio = () => {
     this.setState({ isAddNew: false });
     if (this.state.isAudioOn) {
