@@ -674,7 +674,13 @@ class TextToSpeech extends React.Component<
                       toast(this.props.t("Take effect at next startup"));
                       return;
                     }
-                    if (event.target.value === this.voices.length - 1 + "") {
+                    const selectedIndex = parseInt(event.target.value, 10);
+                    const selectedVoice = this.voices[selectedIndex];
+                    if (
+                      isElectron &&
+                      selectedVoice &&
+                      selectedVoice.name === "Add new voice"
+                    ) {
                       window.speechSynthesis && window.speechSynthesis.cancel();
                       TTSUtil.pauseAudio();
                       this.setState({ isAddNew: true, isAudioOn: false });
